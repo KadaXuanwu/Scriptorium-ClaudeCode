@@ -40,6 +40,7 @@ try {
     # The manifest and the model list: a provider, with the windows the usage events name.
     $manifest = Get-Content (Join-Path $PSScriptRoot 'plugin.json') -Raw | ConvertFrom-Json
     Assert-Equal "$($manifest.name) $($manifest.api) $($manifest.provider) $($manifest.skills)" 'claude 1 True .claude/skills' 'the manifest'
+    Assert-Equal (Test-Path (Join-Path $PSScriptRoot $manifest.card) -PathType Leaf) $true 'the picture behind the account cards'
     $models = Get-Content (Join-Path $PSScriptRoot 'models.json') -Raw | ConvertFrom-Json
     Assert-Equal (($models.windows.PSObject.Properties | ForEach-Object { $_.Name }) -join ',') 'five_hour,seven_day,seven_day_overage_included' 'the windows'
     Assert-Equal "$($models.windows.seven_day_overage_included.models) $($models.windows.seven_day.keep)" '*fable* True' 'the Fable week holds Fable alone, and the week keeps'
