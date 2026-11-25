@@ -210,14 +210,15 @@ try {
     $settingsFile = Join-Path $queue 'run-settings.json'
     Assert-Equal ((Split-Path $command.FilePath -Leaf) -replace '\.cmd$', '') 'claude' 'the claude command on the PATH'
     $expected = @('-p', '"Do ticket #5."', '--permission-mode', 'auto', '--mcp-config', "`"$mcp`"", '--strict-mcp-config', '--settings', "`"$settingsFile`"",
-        '--disallowedTools', "`"$(Call Get-Variable UnusedTools -ValueOnly)`"", '--output-format', 'stream-json', '--verbose', '--model', 'claude-opus-5-5',
+        '--disallowedTools', "`"$(& $module { $UnusedTools })`"", '--output-format', 'stream-json', '--verbose', '--model', 'claude-opus-5-5',
         '--effort', 'high', '--add-dir', '"D:/Work/App-w1"', '--max-budget-usd', '60') -join ' '
     Assert-Equal ($command.Arguments -join ' ') $expected 'the arguments of a run'
     Assert-Equal "$($command.Env.CLAUDE_CONFIG_DIR -eq $folder) $($null -eq $command.Env.CLAUDE_CODE_DISABLE_ADVISOR_TOOL) $($command.Env.CLAUDE_CODE_AUTO_COMPACT_WINDOW)" 'True True 283000' 'the login, the advisor on and the compact window'
     $settings = Get-Content $settingsFile -Raw | ConvertFrom-Json
     Assert-Equal ($settings.permissions.allow -join ',') 'Bash(git:*),Bash(gh:*),Bash(unity command:*),Bash(dotnet:*),mcp__Docs' 'the commands as tool rules, the rules in Claude Code''s syntax, each MCP server once'
     Assert-Equal "$($settings.advisorModel) $($settings.includeCoAuthoredBy) $($settings.disableBundledSkills) $($settings.syncClaudeAiSkills) '$($settings.attribution.commit)'" "claude-fable-5-2 False True False ''" 'the run''s settings'
-    Assert-Equal (Get-Content $mcp -Raw) '{"mcpServers":{"Docs":{"command":"docs","type":"stdio"}}}' 'the MCP config'
+    $servers = (Get-Content $mcp -Raw | ConvertFrom-Json).mcpServers
+    Assert-Equal "$(@($servers.PSObject.Properties).Count) $($servers.Docs.command) $($servers.Docs.type)" '1 docs stdio' 'the MCP config'
     # A resumed run with no advisor, no effort, no cap and no compact size, on the command-line login.
     $bareRun = @{ Prompt = 'Go on.'; Session = 's-1'; Model = 'claude-opus-5-5'; Effort = ''; Advisor = ''; CompactAt = 0; Cap = 0; Login = ''
         Commands = @('git'); Tools = @(); Dir = $root; AddDirs = @(); McpServers = @{} }
