@@ -87,7 +87,8 @@ function Read-Credentials([string] $login) {
 function Get-CredentialsStamp([string] $login) {
     $file = Join-Path (Get-LoginDir $login) '.credentials.json'
     if (Test-Path $file) {
-        return [string](Get-Item $file).LastWriteTimeUtc.Ticks
+        # -Force: a file whose name starts with a dot is hidden on macOS and Linux, and Get-Item does not find it.
+        return [string](Get-Item -LiteralPath $file -Force).LastWriteTimeUtc.Ticks
     }
     $text = Get-CredentialsText $login
     if (-not $text) {
