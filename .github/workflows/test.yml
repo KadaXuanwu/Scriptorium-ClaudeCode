@@ -1,0 +1,26 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            shell: powershell
+          - os: windows-latest
+            shell: pwsh
+          - os: ubuntu-latest
+            shell: pwsh
+          - os: macos-latest
+            shell: pwsh
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run plugin.test.ps1 in ${{ matrix.shell }}
+        shell: pwsh
+        run: ${{ matrix.shell }} -NoProfile -ExecutionPolicy Bypass -File plugin.test.ps1

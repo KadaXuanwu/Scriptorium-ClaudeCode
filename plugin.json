@@ -1,0 +1,10 @@
+{
+    "name": "claude",
+    "title": "Scriptorium for Claude Code",
+    "version": "1.0.0",
+    "api": 1,
+    "description": "Runs the workers on Claude Code with a Claude plan: its models, its usage windows and its sign-in.",
+    "requires": ["claude"],
+    "provider": true,
+    "skills": ".claude/skills"
+}

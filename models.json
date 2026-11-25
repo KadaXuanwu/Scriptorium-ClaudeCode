@@ -1,0 +1,29 @@
+{
+  "updated": "2026-11-18",
+  "models": {
+    "claude-fable-5-2": { "title": "Fable 5.2", "effort": "xhigh", "price": [8, 40] },
+    "claude-opus-5-5": { "title": "Opus 5.5", "effort": "medium", "price": [4, 20] },
+    "claude-sonnet-5-5": { "title": "Sonnet 5.5", "effort": "xhigh", "price": [2, 10] },
+    "claude-haiku-5-5": { "title": "Haiku 5.5", "effort": "xhigh", "price": [0.1, 0.5] }
+  },
+  "efforts": ["low", "medium", "high", "xhigh", "max"],
+  "effort": "xhigh",
+  "complexities": {
+    "low": { "models": ["claude-opus-5-5@medium"] },
+    "medium": { "models": ["claude-opus-5-5@high"], "advisor": true },
+    "high": { "models": ["claude-opus-5-5@xhigh"], "advisor": true },
+    "design": { "models": ["claude-fable-5-2@high"] }
+  },
+  "compactAt": 250000,
+  "compactRange": [67000, 967000],
+  "runCap": 60,
+  "advisor": { "model": "claude-fable-5-2" },
+  "windows": {
+    "five_hour": { "title": "5 hours", "seconds": 18000, "stopAt": 0.98, "pickUp": { "S": 0.90, "M": 0.75, "L": 0.50 } },
+    "seven_day": { "title": "Week", "seconds": 604800, "stopAt": 1.0, "keep": true },
+    "seven_day_overage_included": {
+      "title": "Fable week", "seconds": 604800, "stopAt": 0.98, "models": "*fable*",
+      "pickUp": { "design": 0.90 }, "after": "claude-opus-5-5@xhigh"
+    }
+  }
+}
