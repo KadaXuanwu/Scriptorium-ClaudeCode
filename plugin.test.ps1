@@ -182,19 +182,14 @@ try {
     Assert-Equal "$($read.Url) | $($read.Message)" 'https://claude.ai/oauth/authorize?code=1&x=2 | https://claude.ai/oauth/authorize?code=1&x=2' 'the sign-in link'
     Assert-Equal (& $hooks.ReadSignIn (New-Context @{ Text = "Paste code here if prompted > Login failed: bad code`n" })).Message 'Login failed: bad code' 'the last line without the prompt'
 
-    # A stand-in for the claude command, first on the PATH: it prints a usage event, a compaction and a result.
+    # A stand-in for the claude command, first on the PATH: the hooks name its path and never start it.
     $bin = Join-Path $root 'bin'
     New-Item -ItemType Directory -Force $bin | Out-Null
-    $lines = @(
-        '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":0,"unifiedWindows":{"five_hour":{"utilization":0.25,"resetsAt":1000},"seven_day":{"utilization":0.5,"resetsAt":9000}}}}'
-        '{"type":"system","subtype":"compact_boundary","compact_metadata":{"pre_tokens":900,"post_tokens":300},"usage":{"cacheReadInputTokens":800}}'
-        '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.001,"result":"ok","session_id":"s-1"}'
-    )
     if ($env:OS -eq 'Windows_NT') {
-        Set-Content (Join-Path $bin 'claude.cmd') (@('@echo off') + @($lines | ForEach-Object { "echo $_" })) -Encoding ascii
+        Set-Content (Join-Path $bin 'claude.cmd') '@echo off' -Encoding ascii
         $env:PATH = "$bin;$env:PATH"
     } else {
-        Set-Content (Join-Path $bin 'claude') (@('#!/bin/sh', "cat <<'EOF'") + $lines + @('EOF')) -Encoding ascii
+        Set-Content (Join-Path $bin 'claude') '#!/bin/sh' -Encoding ascii
         & chmod +x (Join-Path $bin 'claude')
         $env:PATH = "${bin}:$env:PATH"
     }
@@ -229,16 +224,33 @@ try {
     Assert-Equal (Get-Content $mcp -Raw) '{"mcpServers":{}}' 'an MCP config with no server'
     Assert-Equal ((Get-Content $settingsFile -Raw | ConvertFrom-Json).PSObject.Properties.Name -contains 'advisorModel') $false 'no advisor in the settings'
 
-    # A probe and a compaction, with the stand-in: the variables are put back after each.
-    $env:CLAUDE_CONFIG_DIR = 'before'
-    $probe = & $hooks.Probe (New-Context @{ Login = $folder; Dir = $root })
+    # A probe: the base runs the command, and ReadProbe reads what it printed. The Fable limit counts as the plan's.
+    $probe = & $hooks.GetProbe (New-Context @{ Login = $folder; Dir = $root })
+    Assert-Equal "$((Split-Path $probe.FilePath -Leaf) -replace '\.cmd$', '') $($probe.Env.CLAUDE_CONFIG_DIR -eq $folder)" 'claude True' 'the probe command and its login'
+    Assert-Equal ($probe.Arguments -join ' ') '-p "Reply: ok" --model haiku --tools= --system-prompt "Reply with one dot." --setting-sources=local --strict-mcp-config --disable-slash-commands --max-turns 1 --output-format stream-json --verbose' 'the arguments of a probe, with the quotes of each that holds a space'
+    $probe = & $hooks.GetProbe (New-Context @{ Login = ''; Dir = $root })
+    Assert-Equal "$($probe.Env.ContainsKey('CLAUDE_CONFIG_DIR')) $($null -eq $probe.Env.CLAUDE_CONFIG_DIR)" 'True True' 'a probe of the command-line login takes the variable away'
+    $printed = @(
+        '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":0,"unifiedWindows":{"five_hour":{"utilization":0.25,"resetsAt":1000},"seven_day":{"utilization":0.5,"resetsAt":9000}}}}'
+        '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.001,"result":"ok","session_id":"s-1"}'
+    ) -join "`n"
+    $probe = & $hooks.ReadProbe (New-Context @{ Text = $printed })
     Assert-Equal "$($probe.Answered) '$($probe.Kind)' $($probe.Text) $($probe.Usage.Windows.five_hour.Used) $($probe.Usage.Windows.seven_day.ResetsAt)" "True '' ok 0.25 9000" 'a probe that the account answered'
+    $probe = & $hooks.ReadProbe (New-Context @{ Text = '{"type":"result","subtype":"success","is_error":true,"total_cost_usd":0,"result":"' + $fable + '"}' })
+    Assert-Equal "$($probe.Answered) $($probe.Kind) $($null -eq $probe.Usage)" 'True limit True' 'the Fable limit refuses a probe as the plan''s limit'
+    $probe = & $hooks.ReadProbe (New-Context @{ Text = '' })
+    Assert-Equal "$($probe.Answered) '$($probe.Kind)'" "False ''" 'a probe that printed nothing'
+
+    # A compaction: the run's own arguments with /compact on the held session, and the line from what it printed.
     $held = @{} + $bareRun
     $held.Login = $folder
-    $line = & $hooks.Compact (New-Context @{ Run = $held; Log = (Join-Path $root 'compact.jsonl') })
-    Assert-Equal $line 'the session went from 900 to 300 tokens, 800 read from the cache.' 'a compaction'
-    Assert-Equal "$env:CLAUDE_CONFIG_DIR '$env:CLAUDE_CODE_DISABLE_ADVISOR_TOOL'" "before ''" 'the variables are as before'
-    Remove-Item Env:CLAUDE_CONFIG_DIR
+    $command = & $hooks.GetCompact (New-Context @{ Run = $held })
+    Assert-Equal (($command.Arguments | Select-Object -First 4) -join ' ') '-p /compact --resume s-1' 'the compaction of the held session'
+    Assert-Equal "$($command.Env.CLAUDE_CONFIG_DIR -eq $folder) $($command.Env.ContainsKey('CLAUDE_CODE_AUTO_COMPACT_WINDOW')) $(@($command.Arguments) -contains '--max-budget-usd')" 'True False False' 'no cap and no compact window for a compaction'
+    $printed = '{"type":"system","subtype":"compact_boundary","compact_metadata":{"pre_tokens":900,"post_tokens":300},"usage":{"cacheReadInputTokens":800}}'
+    Assert-Equal (& $hooks.ReadCompact (New-Context @{ Text = $printed })) 'the session went from 900 to 300 tokens, 800 read from the cache.' 'a compaction'
+    Assert-Equal ($null -eq (& $hooks.ReadCompact (New-Context @{ Text = '{"type":"result","is_error":true}' }))) $true 'a compaction that failed gives no line'
+    Assert-Equal "$($hooks.ContainsKey('Probe')) $($hooks.ContainsKey('Compact'))" 'False False' 'the base starts the probe and the compaction'
 } finally {
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
