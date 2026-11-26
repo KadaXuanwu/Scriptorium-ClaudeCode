@@ -352,10 +352,12 @@ function ConvertTo-ToolRule([string] $start) {
     return "Bash($($start.Trim()):*)"
 }
 
-# The tool rules of a run: its commands as rules, then the rules that the project and its plugins give in Claude
-# Code's own syntax, then every tool of each MCP server a plugin gives.
-function Get-ToolRules($run) {
-    $rules = @($run.Commands | Where-Object { $_ } | ForEach-Object { ConvertTo-ToolRule $_ }) + @($run.Tools | Where-Object { $_ })
+# The tool rules of a run: its commands as rules, then the rules in Claude Code's own syntax ($own: `allowedTools` of
+# this plugin's entry in scriptorium.json; then the older form, from the project and its plugins), then every tool of
+# each MCP server a plugin gives.
+function Get-ToolRules($run, $own) {
+    $rules = @($run.Commands | Where-Object { $_ } | ForEach-Object { ConvertTo-ToolRule $_ }) +
+        @($own | Where-Object { $_ } | ForEach-Object { [string]$_ }) + @($run.Tools | Where-Object { $_ })
     if ($run.McpServers) {
         $rules += @($run.McpServers.Keys | ForEach-Object { "mcp__$_" })
     }
@@ -380,7 +382,7 @@ function Get-RunCommand($ctx, [switch] $Compact) {
     [System.IO.File]::WriteAllText($mcpConfig, (@{ mcpServers = $servers } | ConvertTo-Json -Depth 8 -Compress))
     $runSettings = Join-Path $ctx.QueueDir 'run-settings.json'
     $advisorSetting = if ($run.Advisor) { ",`"advisorModel`":`"$($run.Advisor)`"" } else { '' }
-    $allow = ConvertTo-Json -InputObject @(Get-ToolRules $run) -Compress
+    $allow = ConvertTo-Json -InputObject @(Get-ToolRules $run $ctx.Settings.allowedTools) -Compress
     [System.IO.File]::WriteAllText($runSettings, '{"includeCoAuthoredBy":false,"attribution":{"commit":"","pr":""},' +
         '"disableBundledSkills":true,"syncClaudeAiSkills":false,' +
         '"permissions":{"allow":' + $allow + '}' + $advisorSetting + '}')

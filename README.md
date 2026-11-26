@@ -94,8 +94,18 @@ often they called each, to keep the block list right.
 
 - `--permission-mode auto`, the model and effort, `--add-dir` for the worker's copy in a job in another repo.
 - **Tool rules:** each command of the base and of the plugins (`git`, `unity command`) as `Bash(<command>:*)`, the
-  rules in Claude Code's own syntax from `allowedTools` in `scriptorium.json` and from the plugins, and every tool of
-  each MCP server a plugin gives. They are a list in the run's settings file.
+  rules in Claude Code's own syntax, and every tool of each MCP server a plugin gives. They are a list in the run's
+  settings file.
+
+Rules in Claude Code's own syntax go in this plugin's entry in `scriptorium.json`, under `allowedTools`:
+
+```json
+"plugins": { "claude": { "allowedTools": ["Bash(npm test:*)", "WebFetch(domain:docs.example.com)"] } }
+```
+
+Only Claude Code reads them there. `allowedTools` at the top of `scriptorium.json` and the rules other plugins give are
+the older form: every provider gets them, so a project with workers on another tool sends it Claude Code's rules too.
+This plugin still reads them.
 - **Only the plugins' MCP servers, no unused tool and no unused skill** (Token savings, above).
 - **No attribution:** Claude Code's own commit and PR attribution is off.
 
