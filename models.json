@@ -18,12 +18,13 @@
   "compactRange": [67000, 967000],
   "runCap": 60,
   "advisor": { "model": "claude-fable-5-2" },
+  "probeModel": "haiku",
   "windows": {
     "five_hour": { "title": "5 hours", "seconds": 18000, "stopAt": 0.98, "pickUp": { "S": 0.90, "M": 0.75, "L": 0.50 } },
     "seven_day": { "title": "Week", "seconds": 604800, "stopAt": 1.0, "keep": true },
     "seven_day_overage_included": {
       "title": "Fable week", "seconds": 604800, "stopAt": 0.98, "models": "*fable*",
-      "pickUp": { "design": 0.90 }, "after": "claude-opus-5-5@xhigh"
+      "pickUp": { "design": 0.90 }, "after": "claude-opus-5-5@xhigh", "refusal": "Fable limit"
     }
   }
 }

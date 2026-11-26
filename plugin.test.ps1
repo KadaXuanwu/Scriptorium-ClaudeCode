@@ -47,6 +47,11 @@ try {
     $named = @($models.complexities.PSObject.Properties | ForEach-Object { $_.Value.models }) + @($models.windows.seven_day_overage_included.after) + @($models.advisor.model) |
         ForEach-Object { ($_ -split '@')[0] }
     Assert-Equal @($named | Where-Object { -not $models.models.$_ }).Count 0 'every model that the list names is in it'
+    Assert-Equal "$([bool]$models.probeModel) $([bool]$models.windows.seven_day_overage_included.refusal)" 'True True' 'the probe''s model and the wording of a window''s refusal'
+    # The code names no model: models.json holds them (no model's id, no word of its title, no probe model).
+    $code = Get-Content (Join-Path $PSScriptRoot 'plugin.ps1') -Raw
+    $words = @($models.models.PSObject.Properties | ForEach-Object { $_.Name; ($_.Value.title -split ' ')[0] }) + @($models.probeModel)
+    Assert-Equal (@($words | Where-Object { $code -match "\b$([regex]::Escape($_))\b" }) -join ',') '' 'no model''s name in plugin.ps1'
 
     # The run's numbers. A run on Opus with the Fable advisor: request 1 on two lines (the last one's usage counts), a
     # subagent's request, request 2 with the advisor and a read, a compaction, request 3 with text only, and two
@@ -106,10 +111,10 @@ try {
     Assert-Equal (Call Get-Refusal (Result '{"subtype":"success","is_error":true,"total_cost_usd":3.1,"result":"You have hit your limit"}')) 'limit' 'the usage limit of the plan'
     # The Fable limit: the first line is real, with the same api_error as a plan without the model.
     $fable = 'You''ve reached your Fable limit. Switch to another model, or manage usage credits at https://claude.ai/settings/usage?from=cc_cli_limit_message, to continue.'
-    Assert-Equal (Call Get-Refusal (Result ('{"subtype":"success","is_error":true,"total_cost_usd":15.48,"api_error":"model_requires_usage_credits","result":"' + $fable + '"}'))) 'fable' 'the Fable limit cuts a run off'
-    Assert-Equal (Call Get-Refusal (Result ('{"subtype":"success","is_error":true,"total_cost_usd":0,"api_error":"model_requires_usage_credits","result":"' + $fable + '"}'))) 'fable' 'the Fable limit at the first turn'
-    Assert-Equal (Call Get-Refusal (Result '{"subtype":"success","is_error":true,"total_cost_usd":3.1,"result":"You''ve hit your Fable limit - resets 7pm"}')) 'fable' 'the other wording of the Fable limit'
-    Assert-Equal (Call Get-Refusal (Result '{"subtype":"success","is_error":true,"total_cost_usd":3.1,"result":"Fable limit reached - continuing on Opus 5.5 uses usage credits"}')) 'fable' 'the wording that ends limit reached'
+    Assert-Equal (Call Get-Refusal (Result ('{"subtype":"success","is_error":true,"total_cost_usd":15.48,"api_error":"model_requires_usage_credits","result":"' + $fable + '"}'))) 'window' 'the Fable limit cuts a run off'
+    Assert-Equal (Call Get-Refusal (Result ('{"subtype":"success","is_error":true,"total_cost_usd":0,"api_error":"model_requires_usage_credits","result":"' + $fable + '"}'))) 'window' 'the Fable limit at the first turn'
+    Assert-Equal (Call Get-Refusal (Result '{"subtype":"success","is_error":true,"total_cost_usd":3.1,"result":"You''ve hit your Fable limit - resets 7pm"}')) 'window' 'the other wording of the Fable limit'
+    Assert-Equal (Call Get-Refusal (Result '{"subtype":"success","is_error":true,"total_cost_usd":3.1,"result":"Fable limit reached - continuing on Opus 5.5 uses usage credits"}')) 'window' 'the wording that ends limit reached'
     Assert-Equal (Call Get-Refusal (Result '{"subtype":"success","is_error":true,"total_cost_usd":0,"result":"API Error: 529 Overloaded"}')) 'start' 'a run that did no work, for a cause the list does not know'
     Assert-Equal (Call Get-Refusal (Result '{"subtype":"success","is_error":true,"total_cost_usd":3.1,"result":"API Error: 529 Overloaded"}')) '' 'the same error after work is the failure of the run'
     Assert-Equal (Call Get-Refusal (Result '{"subtype":"error_max_turns","is_error":true,"total_cost_usd":3.1,"result":"Reached the turn limit."}')) '' 'a failure of the run itself'
