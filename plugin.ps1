@@ -18,9 +18,10 @@ $UnusedTools = 'Task,CronCreate,CronDelete,CronList,DesignSync,EnterWorktree,Exi
     'PushNotification,RemoteTrigger,ReportFindings,SendMessage,WebFetch,WebSearch,Workflow,PowerShell,Glob'
 
 # The cheapest request an account answers: Haiku with no tools, settings, plugins or skills, and a one-line system
-# prompt in place of Claude Code's own, about 900 tokens. The Probe hook sends it, in a folder with no CLAUDE.md. A
-# probe of the whole harness read 46,097 tokens.
-$BareRequestArgs = @('--model', 'haiku', '--tools=', '--system-prompt', 'Reply with one dot.', '--setting-sources=local',
+# prompt in place of Claude Code's own, about 900 tokens. The GetProbe hook gives it, and the base runs it in a folder
+# with no CLAUDE.md. A probe of the whole harness read 46,097 tokens. The base joins the arguments with spaces, so one
+# that holds a space carries its quotes.
+$BareRequestArgs = @('--model', 'haiku', '--tools=', '--system-prompt', '"Reply with one dot."', '--setting-sources=local',
     '--strict-mcp-config', '--disable-slash-commands', '--max-turns', '1')
 
 # Claude Code compacts 33000 tokens before its window (CLAUDE_CODE_AUTO_COMPACT_WINDOW, from 100000 to 1000000;
@@ -139,23 +140,16 @@ function Get-LoginEnv([string] $login) {
     return @{ CLAUDE_CONFIG_DIR = $(if ($login) { $login } else { $null }) }
 }
 
-# Runs $block with these environment variables (one with no value is taken away) and, with $dir, in that folder; puts
-# both back after it.
-function Invoke-WithEnv([hashtable] $variables, [scriptblock] $block, [string] $dir = '') {
+# Runs $block with these environment variables (one with no value is taken away) and puts them back after it.
+function Invoke-WithEnv([hashtable] $variables, [scriptblock] $block) {
     $previous = @{}
     foreach ($name in @($variables.Keys)) {
         $previous[$name] = [Environment]::GetEnvironmentVariable($name)
         [Environment]::SetEnvironmentVariable($name, $(if ($null -ne $variables[$name]) { [string]$variables[$name] }))
     }
-    if ($dir) {
-        Push-Location $dir
-    }
     try {
         return (& $block)
     } finally {
-        if ($dir) {
-            Pop-Location
-        }
         foreach ($name in $previous.Keys) {
             [Environment]::SetEnvironmentVariable($name, $previous[$name])
         }
@@ -451,17 +445,21 @@ function Get-RunCommand($ctx, [switch] $Compact) {
         }
     }
     # One word from Haiku ($BareRequestArgs): it shows the account's usage (its rate_limit_event) and whether the
-    # account takes requests. A refused one costs nothing.
-    Probe = {
+    # account takes requests. A refused one costs nothing. The base runs it.
+    GetProbe = {
         param($ctx)
-        $ErrorActionPreference = 'Continue'
-        $text = Invoke-WithEnv (Get-LoginEnv ([string]$ctx.Login)) {
-            (& claude -p 'Reply: ok' @BareRequestArgs --output-format stream-json --verbose 2>$null) -join "`n"
-        } ([string]$ctx.Dir)
-        $result = Read-Result ([string]$text)
+        return @{
+            FilePath = (Get-Command claude).Source; Env = (Get-LoginEnv ([string]$ctx.Login))
+            Arguments = @('-p', '"Reply: ok"') + $BareRequestArgs + @('--output-format', 'stream-json', '--verbose')
+        }
+    }
+    ReadProbe = {
+        param($ctx)
+        $text = [string]$ctx.Text
+        $result = Read-Result $text
         $kind = Get-Refusal $result
         return @{
-            Usage = Read-UsageEvent ([string]$text) $false; Answered = [bool]$result
+            Usage = Read-UsageEvent $text $false; Answered = [bool]$result
             # The Fable limit never refuses Haiku; a kind the base does not know would put the account out.
             Kind = $(if ($kind -eq 'fable') { 'limit' } else { $kind }); Text = [string]$(if ($result) { $result.result })
         }
@@ -470,26 +468,21 @@ function Get-RunCommand($ctx, [switch] $Compact) {
         param($ctx)
         return Get-RunCommand $ctx
     }
-    # `/compact` on the held session, with the run's own arguments. It returns a line for the worker's log.
-    Compact = {
+    # `/compact` on the held session, with the run's own arguments. The base runs it.
+    GetCompact = {
         param($ctx)
-        $command = Get-RunCommand $ctx -Compact
-        $log = [string]$ctx.Log
-        return Invoke-WithEnv $command.Env {
-            $process = Start-Process $command.FilePath -ArgumentList $command.Arguments -WorkingDirectory $ctx.Run.Dir -NoNewWindow `
-                -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err"
-            if (-not $process.WaitForExit(600000)) {
-                $process.Kill()
-                return 'no end after 10 minutes, stopped; the session resumes whole.'
-            }
-            $text = if (Test-Path $log) { [System.IO.File]::ReadAllText($log) } else { '' }
-            $tokens = [regex]::Match($text, '"pre_tokens":(\d+),"post_tokens":(\d+)')
-            if (-not $tokens.Success) {
-                return 'failed; the session resumes whole.'
-            }
-            $cached = [regex]::Match($text, '"cacheReadInputTokens":(\d+)').Groups[1].Value
-            return "the session went from $($tokens.Groups[1].Value) to $($tokens.Groups[2].Value) tokens, $cached read from the cache."
+        return Get-RunCommand $ctx -Compact
+    }
+    # The line for the worker's log; nothing for a compaction that failed.
+    ReadCompact = {
+        param($ctx)
+        $text = [string]$ctx.Text
+        $tokens = [regex]::Match($text, '"pre_tokens":(\d+),"post_tokens":(\d+)')
+        if (-not $tokens.Success) {
+            return $null
         }
+        $cached = [regex]::Match($text, '"cacheReadInputTokens":(\d+)').Groups[1].Value
+        return "the session went from $($tokens.Groups[1].Value) to $($tokens.Groups[2].Value) tokens, $cached read from the cache."
     }
     ReadUsage = {
         param($ctx)

@@ -9,7 +9,7 @@ It runs on a paid Claude plan, never an API key.
 ## What it needs
 
 - Scriptorium with the provider contract ([docs/PLUGINS.md](https://github.com/KadaXuanwu/Scriptorium/blob/main/docs/PLUGINS.md),
-  A provider).
+  A provider), with the hooks `GetProbe` and `GetCompact`. An older base finds no probe and no compaction here.
 - Claude Code (`claude`) on the PATH, signed in with a paid Claude plan.
 - Windows PowerShell 5.1 on Windows, or PowerShell 7.4 or later on macOS and Linux, as the base.
 
@@ -109,9 +109,11 @@ The two files of a run are in the worker's queue folder: `mcp.json` and `run-set
 | `SignIn` | Gives the base `claude auth login` for the folder. The page shows its link and passes it the code |
 | `ReadSignIn` | Finds the sign-in link in that command's output, and its last line for a failure |
 | `SignOut` | Runs `claude auth logout` for a folder of its own. Never for the command-line login |
-| `Probe` | Sends one word to the smallest model with no tools, settings, plugins or skills and a one-line system prompt (Token savings). It shows the account's usage and whether the account takes requests. A refused one costs nothing |
+| `GetProbe` | Gives the base a request of one word to the smallest model with no tools, settings, plugins or skills and a one-line system prompt (Token savings). It shows the account's usage and whether the account takes requests. A refused one costs nothing. The base runs it, with a time limit |
+| `ReadProbe` | Reads the usage, the reply and the refusal from what the probe printed. The limit of a window of some models counts as the plan's limit here |
 | `GetCommand` | Writes `mcp.json` and `run-settings.json` and gives the base the `claude -p` command of a run |
-| `Compact` | Runs `claude -p /compact --resume` on a held session with the run's own arguments, so its cache holds. Ends it after 10 minutes |
+| `GetCompact` | Gives the base `claude -p /compact --resume` on a held session with the run's own arguments, so its cache holds. The base runs it, with a time limit |
+| `ReadCompact` | Reads the session's size before and after from what the compaction printed. Gives no line for one that failed |
 | `ReadUsage` | Reads the windows from a log's last (or first) `rate_limit_event` |
 | `ReadRun` | Reads the session, the result (its error, its cost, its refusal by the wording of the error) and the run's numbers from a log |
 | `ReadStep` | Says what a log line did: the run's words, or the tool it called |
