@@ -7,8 +7,13 @@
 $OnWindows = $env:OS -eq 'Windows_NT'
 $OnMac = -not $OnWindows -and [bool]$IsMacOS
 
-# The plan's weekly window of Fable alone, as the CLI's rate limit events name it (models.json, `windows`).
-$FableWindow = 'seven_day_overage_included'
+# The plugin's models.json: it holds every value that changes with Claude's models and plans.
+$ModelsFile = Join-Path $PSScriptRoot 'models.json'
+
+# models.json as an object, read again at each use, as the base reads it.
+function Read-PluginModels {
+    return [System.IO.File]::ReadAllText($ModelsFile) | ConvertFrom-Json
+}
 
 # Tools no run used in 631 logs; without them every turn reads 4,750 tokens less. Workflow: given in 89 of 698 logs,
 # never called, 1,977 tokens. Skill and ToolSearch stay: without them the tools Claude Code holds back load in full.
@@ -17,11 +22,11 @@ $FableWindow = 'seven_day_overage_included'
 $UnusedTools = 'Task,CronCreate,CronDelete,CronList,DesignSync,EnterWorktree,ExitWorktree,ListAgents,NotebookEdit,' +
     'PushNotification,RemoteTrigger,ReportFindings,SendMessage,WebFetch,WebSearch,Workflow,PowerShell,Glob'
 
-# The cheapest request an account answers: Haiku with no tools, settings, plugins or skills, and a one-line system
-# prompt in place of Claude Code's own, about 900 tokens. The GetProbe hook gives it, and the base runs it in a folder
-# with no CLAUDE.md. A probe of the whole harness read 46,097 tokens. The base joins the arguments with spaces, so one
-# that holds a space carries its quotes.
-$BareRequestArgs = @('--model', 'haiku', '--tools=', '--system-prompt', '"Reply with one dot."', '--setting-sources=local',
+# The cheapest request an account answers: the smallest model (models.json, `probeModel`) with no tools, settings,
+# plugins or skills, and a one-line system prompt in place of Claude Code's own, about 900 tokens. The GetProbe hook
+# gives it, and the base runs it in a folder with no CLAUDE.md. A probe of the whole harness read 46,097 tokens. The
+# base joins the arguments with spaces, so one that holds a space carries its quotes.
+$BareRequestArgs = @('--tools=', '--system-prompt', '"Reply with one dot."', '--setting-sources=local',
     '--strict-mcp-config', '--disable-slash-commands', '--max-turns', '1')
 
 # Claude Code compacts 33000 tokens before its window (CLAUDE_CODE_AUTO_COMPACT_WINDOW, from 100000 to 1000000;
@@ -108,31 +113,31 @@ function Get-LoginEmail([string] $login) {
     return [regex]::Match((Get-Content $file -Raw -Encoding UTF8), '"emailAddress"\s*:\s*"([^"]+)"').Groups[1].Value
 }
 
-# A plan's size relative to Pro, from the login's rate limit tier: a run costs a bigger plan a smaller share.
+# The multiple of the smallest plan that a rate limit tier names (`..._20x`), as the CLI's credentials hold it.
+$TierSizePattern = '_(\d+)x\b'
+
+# A plan's size relative to the smallest plan, from the login's rate limit tier: a run costs a bigger plan a smaller
+# share. A tier that names no multiple is 1.
 function Get-PlanSize([string] $tier) {
-    if ($tier -match 'max_20x') {
-        return 20.0
-    }
-    if ($tier -match 'max_5x') {
-        return 5.0
+    if ($tier -match $TierSizePattern) {
+        return [double]$Matches[1]
     }
     return 1.0
 }
 
-# A login's plan as the page names it, from its credentials.
+# A login's plan as the page names it, from its credentials: the subscription's type, and the tier's multiple when it
+# names one.
 function Get-PlanName($credentials) {
     $oauth = if ($credentials) { $credentials.claudeAiOauth } else { $null }
-    if (-not $oauth) {
+    $type = if ($oauth) { [string]$oauth.subscriptionType } else { '' }
+    if (-not $type) {
         return ''
     }
-    if ($oauth.rateLimitTier -match 'max_(\d+)x') {
-        return "Max $($Matches[1])x"
+    $name = $type.Substring(0, 1).ToUpperInvariant() + $type.Substring(1)
+    if ([string]$oauth.rateLimitTier -match $TierSizePattern) {
+        $name += " $($Matches[1])x"
     }
-    $type = [string]$oauth.subscriptionType
-    if ($type) {
-        return $type.Substring(0, 1).ToUpperInvariant() + $type.Substring(1)
-    }
-    return ''
+    return $name
 }
 
 # The variable that names a login for the claude processes: its folder, and none for the command-line login.
@@ -156,9 +161,21 @@ function Invoke-WithEnv([hashtable] $variables, [scriptblock] $block) {
     }
 }
 
+# The window of some models whose refusal this text holds: the name of the entry under models.json's `windows` whose
+# `refusal` (the CLI's wording, as plain text) it holds, '' for none.
+function Get-RefusedWindow([string] $text) {
+    foreach ($window in @((Read-PluginModels).windows.PSObject.Properties)) {
+        $wording = [string]$window.Value.refusal
+        if ($wording -and $text -match [regex]::Escape($wording)) {
+            return $window.Name
+        }
+    }
+    return ''
+}
+
 # Why a run that ended with an error is not its ticket's failure, from its result line ($result: `is_error`, the
-# error's text in `result`, `total_cost_usd` and `subtype`): 'model', 'subscription', 'login', 'limit', 'start' (the
-# base's kinds, Scriptorium's limits.ps1) or 'fable' (the Fable limit: the ReadRun hook names the window for it).
+# error's text in `result`, `total_cost_usd` and `subtype`): 'model', 'subscription', 'login', 'limit', 'window' (the
+# limit of a window of some models, Get-RefusedWindow) or 'start', the base's kinds (Scriptorium's limits.ps1).
 # 'start': the run did no work (no cost) and its first request failed, for a cause the text does not name. It catches
 # a wording this list does not know. '': the run's own failure, its cap (`subtype` `error_max_budget_usd`), or no
 # error. The texts are the CLI's own.
@@ -169,9 +186,9 @@ function Get-Refusal($result) {
     }
     $text = [string]$result.result
     $noWork = [double]$result.total_cost_usd -eq 0
-    # First: one wording ends "limit reached", and its api_error is the same as a plan without the model's.
-    if ($text -match 'Fable limit') {
-        return 'fable'
+    # First: a window's refusal can end "limit reached", and its api_error is the same as a plan without the model's.
+    if (Get-RefusedWindow $text) {
+        return 'window'
     }
     if ($noWork -and $text -match 'requires usage credits|not available|no access|access to') {
         return 'model'
@@ -446,13 +463,14 @@ function Get-RunCommand($ctx, [switch] $Compact) {
             Invoke-WithEnv (Get-LoginEnv ([string]$ctx.Login)) { & claude auth logout | Out-Null }
         }
     }
-    # One word from Haiku ($BareRequestArgs): it shows the account's usage (its rate_limit_event) and whether the
-    # account takes requests. A refused one costs nothing. The base runs it.
+    # One word from the smallest model ($BareRequestArgs): it shows the account's usage (its rate_limit_event) and
+    # whether the account takes requests. A refused one costs nothing. The base runs it.
     GetProbe = {
         param($ctx)
         return @{
             FilePath = (Get-Command claude).Source; Env = (Get-LoginEnv ([string]$ctx.Login))
-            Arguments = @('-p', '"Reply: ok"') + $BareRequestArgs + @('--output-format', 'stream-json', '--verbose')
+            Arguments = @('-p', '"Reply: ok"', '--model', [string](Read-PluginModels).probeModel) + $BareRequestArgs +
+                @('--output-format', 'stream-json', '--verbose')
         }
     }
     ReadProbe = {
@@ -462,8 +480,9 @@ function Get-RunCommand($ctx, [switch] $Compact) {
         $kind = Get-Refusal $result
         return @{
             Usage = Read-UsageEvent $text $false; Answered = [bool]$result
-            # The Fable limit never refuses Haiku; a kind the base does not know would put the account out.
-            Kind = $(if ($kind -eq 'fable') { 'limit' } else { $kind }); Text = [string]$(if ($result) { $result.result })
+            # A window of some models does not count the probe's model, and a probe's reading names no window: its
+            # refusal counts as the plan's limit.
+            Kind = $(if ($kind -eq 'window') { 'limit' } else { $kind }); Text = [string]$(if ($result) { $result.result })
         }
     }
     GetCommand = {
@@ -512,12 +531,9 @@ function Get-RunCommand($ctx, [switch] $Compact) {
             $run.Worked = $run.Cost -ne 0
             $run.Capped = $result.subtype -eq 'error_max_budget_usd'
             $run.Text = [string]$result.result
-            $kind = Get-Refusal $result
-            if ($kind -eq 'fable') {
-                $run.Kind = 'window'
-                $run.Window = $FableWindow
-            } else {
-                $run.Kind = $kind
+            $run.Kind = Get-Refusal $result
+            if ($run.Kind -eq 'window') {
+                $run.Window = Get-RefusedWindow $run.Text
             }
         }
         return $run

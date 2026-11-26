@@ -56,6 +56,13 @@ Accounts tab the windows and lines; the owner changes both there.
   measured with Claude Code 2.1.323), so the plugin gives each run the size plus that lead.
 - `price` (dollars for a million tokens, input and output) is read by no script: runs use the plan. It is there for
   whoever weighs a model's cost.
+- **The probe's model** (`probeModel`, this plugin's own key): the model of the one-word request that reads an
+  account's usage. Take the smallest one.
+- **A window's refusal** (`refusal` in a window's entry, this plugin's own key): the words of Claude Code's error when
+  that window refuses a request, as plain text. An error that holds them is that window's limit, not the plan's.
+
+The base ignores both keys. The plan's size comes from its rate limit tier: the multiple the tier names (`_20x`),
+else 1.
 
 | Window | Name in the settings | What it is |
 | ------ | -------------------- | ---------- |
