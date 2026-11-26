@@ -201,7 +201,9 @@ try {
         Login = $folder; Commands = @('git', 'gh', 'unity command'); Tools = @('Bash(dotnet:*)', 'mcp__Docs'); Dir = $root; AddDirs = @('D:/Work/App-w1')
         McpServers = [ordered]@{ Docs = @{ type = 'stdio'; command = 'docs' } }
     }
-    $command = & $hooks.GetCommand (New-Context @{ Run = $run })
+    # The plugin's own entry in scriptorium.json holds rules in Claude Code's syntax; one repeats a command's rule.
+    $own = @{ allowedTools = ('{"allowedTools":["Bash(npm test:*)","Bash(git:*)"]}' | ConvertFrom-Json).allowedTools }
+    $command = & $hooks.GetCommand (New-Context @{ Run = $run; Settings = $own })
     $mcp = Join-Path $queue 'mcp.json'
     $settingsFile = Join-Path $queue 'run-settings.json'
     Assert-Equal ((Split-Path $command.FilePath -Leaf) -replace '\.cmd$', '') 'claude' 'the claude command on the PATH'
@@ -211,7 +213,7 @@ try {
     Assert-Equal ($command.Arguments -join ' ') $expected 'the arguments of a run'
     Assert-Equal "$($command.Env.CLAUDE_CONFIG_DIR -eq $folder) $($null -eq $command.Env.CLAUDE_CODE_DISABLE_ADVISOR_TOOL) $($command.Env.CLAUDE_CODE_AUTO_COMPACT_WINDOW)" 'True True 283000' 'the login, the advisor on and the compact window'
     $settings = Get-Content $settingsFile -Raw | ConvertFrom-Json
-    Assert-Equal ($settings.permissions.allow -join ',') 'Bash(git:*),Bash(gh:*),Bash(unity command:*),Bash(dotnet:*),mcp__Docs' 'the commands as tool rules, the rules in Claude Code''s syntax, each MCP server once'
+    Assert-Equal ($settings.permissions.allow -join ',') 'Bash(git:*),Bash(gh:*),Bash(unity command:*),Bash(npm test:*),Bash(dotnet:*),mcp__Docs' 'the commands as tool rules, the plugin''s own rules, the older form''s rules, each MCP server once'
     Assert-Equal "$($settings.advisorModel) $($settings.includeCoAuthoredBy) $($settings.disableBundledSkills) $($settings.syncClaudeAiSkills) '$($settings.attribution.commit)'" "claude-fable-5-2 False True False ''" 'the run''s settings'
     $servers = (Get-Content $mcp -Raw | ConvertFrom-Json).mcpServers
     Assert-Equal "$(@($servers.PSObject.Properties).Count) $($servers.Docs.command) $($servers.Docs.type)" '1 docs stdio' 'the MCP config'
