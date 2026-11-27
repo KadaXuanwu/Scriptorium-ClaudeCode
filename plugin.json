@@ -7,5 +7,7 @@
     "requires": ["claude"],
     "provider": true,
     "skills": ".claude/skills",
-    "card": "card.svg"
+    "card": "card.svg",
+    "color": "#D97757",
+    "icon": "icon.svg"
 }
